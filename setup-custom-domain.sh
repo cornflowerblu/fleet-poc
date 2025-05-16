@@ -49,27 +49,39 @@ LB_HOSTED_ZONE_ID=$(aws elbv2 describe-load-balancers \
   --output text \
   --region ${AWS_REGION})
 
-# Create Route53 record set
-echo "Creating Route53 record..."
-aws route53 change-resource-record-sets \
+# Check if Route53 record already exists
+echo "Checking if Route53 record exists..."
+RECORD_EXISTS=$(aws route53 list-resource-record-sets \
   --hosted-zone-id ${HOSTED_ZONE_ID} \
-  --change-batch '{
-    "Changes": [
-      {
-        "Action": "UPSERT",
-        "ResourceRecordSet": {
-          "Name": "'${DOMAIN_NAME}'",
-          "Type": "A",
-          "AliasTarget": {
-            "HostedZoneId": "'${LB_HOSTED_ZONE_ID}'",
-            "DNSName": "'${LB_DNS}'",
-            "EvaluateTargetHealth": true
+  --query "ResourceRecordSets[?Name=='${DOMAIN_NAME}.'].Name" \
+  --output text \
+  --region ${AWS_REGION})
+
+if [ -z "$RECORD_EXISTS" ]; then
+  # Create Route53 record set
+  echo "Creating Route53 record..."
+  aws route53 change-resource-record-sets \
+    --hosted-zone-id ${HOSTED_ZONE_ID} \
+    --change-batch '{
+      "Changes": [
+        {
+          "Action": "UPSERT",
+          "ResourceRecordSet": {
+            "Name": "'${DOMAIN_NAME}'",
+            "Type": "A",
+            "AliasTarget": {
+              "HostedZoneId": "'${LB_HOSTED_ZONE_ID}'",
+              "DNSName": "'${LB_DNS}'",
+              "EvaluateTargetHealth": true
+            }
           }
         }
-      }
-    ]
-  }' \
-  --region ${AWS_REGION}
+      ]
+    }' \
+    --region ${AWS_REGION}
+else
+  echo "Route53 record for ${DOMAIN_NAME} already exists"
+fi
 
 # Find existing certificate for *.ngdegtm.com
 echo "Looking for existing certificate..."
@@ -86,36 +98,68 @@ fi
 
 echo "Found certificate: ${CERT_ARN}"
 
-# Get the current listener ARN
-LISTENER_ARN=$(aws elbv2 describe-listeners \
+# Check if there's an existing listener
+echo "Checking for existing listeners..."
+LISTENERS=$(aws elbv2 describe-listeners \
   --load-balancer-arn ${LB_ARN} \
-  --query 'Listeners[0].ListenerArn' \
-  --output text \
+  --query 'Listeners[*].{ARN:ListenerArn,Protocol:Protocol}' \
+  --output json \
   --region ${AWS_REGION})
 
-# Get the target group ARN
-TG_ARN=$(aws elbv2 describe-listeners \
-  --listener-arns ${LISTENER_ARN} \
-  --query 'Listeners[0].DefaultActions[0].TargetGroupArn' \
-  --output text \
-  --region ${AWS_REGION})
+# Parse the listeners to find TCP and TLS listeners
+TCP_LISTENER_ARN=$(echo $LISTENERS | jq -r '.[] | select(.Protocol == "TCP") | .ARN')
+TLS_LISTENER_ARN=$(echo $LISTENERS | jq -r '.[] | select(.Protocol == "TLS") | .ARN')
 
-# Delete the existing listener
-echo "Deleting existing TCP listener..."
-aws elbv2 delete-listener \
-  --listener-arn ${LISTENER_ARN} \
-  --region ${AWS_REGION}
+# Get the target group ARN from any existing listener
+if [ ! -z "$TCP_LISTENER_ARN" ]; then
+  TG_ARN=$(aws elbv2 describe-listeners \
+    --listener-arns ${TCP_LISTENER_ARN} \
+    --query 'Listeners[0].DefaultActions[0].TargetGroupArn' \
+    --output text \
+    --region ${AWS_REGION})
+elif [ ! -z "$TLS_LISTENER_ARN" ]; then
+  TG_ARN=$(aws elbv2 describe-listeners \
+    --listener-arns ${TLS_LISTENER_ARN} \
+    --query 'Listeners[0].DefaultActions[0].TargetGroupArn' \
+    --output text \
+    --region ${AWS_REGION})
+else
+  echo "Error: No listeners found on the load balancer"
+  exit 1
+fi
 
-# Create a new TLS listener
-echo "Creating new TLS listener..."
-aws elbv2 create-listener \
-  --load-balancer-arn ${LB_ARN} \
-  --protocol TLS \
-  --port 22 \
-  --certificates CertificateArn=${CERT_ARN} \
-  --ssl-policy ELBSecurityPolicy-TLS-1-2-2017-01 \
-  --default-actions Type=forward,TargetGroupArn=${TG_ARN} \
-  --region ${AWS_REGION}
+# If we have a TCP listener but no TLS listener, replace it
+if [ ! -z "$TCP_LISTENER_ARN" ] && [ -z "$TLS_LISTENER_ARN" ]; then
+  # Delete the existing TCP listener
+  echo "Deleting existing TCP listener..."
+  aws elbv2 delete-listener \
+    --listener-arn ${TCP_LISTENER_ARN} \
+    --region ${AWS_REGION}
+
+  # Create a new TLS listener
+  echo "Creating new TLS listener..."
+  aws elbv2 create-listener \
+    --load-balancer-arn ${LB_ARN} \
+    --protocol TLS \
+    --port 22 \
+    --certificates CertificateArn=${CERT_ARN} \
+    --ssl-policy ELBSecurityPolicy-TLS-1-2-2017-01 \
+    --default-actions Type=forward,TargetGroupArn=${TG_ARN} \
+    --region ${AWS_REGION}
+elif [ -z "$TLS_LISTENER_ARN" ]; then
+  # Create a new TLS listener if none exists
+  echo "Creating new TLS listener..."
+  aws elbv2 create-listener \
+    --load-balancer-arn ${LB_ARN} \
+    --protocol TLS \
+    --port 22 \
+    --certificates CertificateArn=${CERT_ARN} \
+    --ssl-policy ELBSecurityPolicy-TLS-1-2-2017-01 \
+    --default-actions Type=forward,TargetGroupArn=${TG_ARN} \
+    --region ${AWS_REGION}
+else
+  echo "TLS listener already exists, no changes needed"
+fi
 
 echo "Setup complete!"
 echo "Your development environment is now accessible at: ${DOMAIN_NAME}"

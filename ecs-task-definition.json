@@ -34,7 +34,7 @@
         "initProcessEnabled": true
       },
       "healthCheck": {
-        "command": ["CMD-SHELL", "service ssh status || exit 1"],
+        "command": ["CMD-SHELL", "service ssh status && netstat -tulpn | grep -q ':22 ' && ps aux | grep -v grep | grep -q sshd && echo 'SSH service is healthy' || exit 1"],
         "interval": 30,
         "timeout": 5,
         "retries": 3,

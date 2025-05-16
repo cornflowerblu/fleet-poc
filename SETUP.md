@@ -67,7 +67,14 @@ chmod +x deploy-environment.sh
 ./deploy-environment.sh
 ```
 
-This creates an ECS cluster and registers the task definition for development environments. Note that you need to create the ECS cluster first before running the deployment script.
+This creates an ECS cluster and registers the task definition for development environments. The script will:
+1. Register the task definition for development environments
+2. Automatically find a suitable subnet in your default VPC
+3. Create or use an existing security group with SSH access
+4. Provide a command to run a development environment
+5. Offer to run a development environment task immediately
+
+When prompted, you can choose to run a development environment task right away by typing 'y'.
 
 ### 5. Set Up Load Balancer and ECS Service
 
