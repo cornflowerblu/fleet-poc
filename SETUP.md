@@ -11,6 +11,8 @@ This guide walks through setting up the initial Proof of Concept (POC) for the L
    - Amazon ECS/Fargate
    - Amazon EFS
    - Amazon ELB (Network Load Balancer)
+   - Amazon Route 53
+   - AWS Certificate Manager
    - IAM
    - CloudWatch Logs
 
@@ -76,23 +78,51 @@ chmod +x setup-load-balancer.sh
 
 This creates a Network Load Balancer for SSH access and an ECS service with the load balancer attached.
 
+### 6. Configure Custom Domain and TLS Certificate
+
+```bash
+# Make the script executable
+chmod +x setup-custom-domain.sh
+
+# Run the custom domain setup script
+./setup-custom-domain.sh
+```
+
+This configures a custom domain (qdev.ngdegtm.com) for the load balancer and applies the existing wildcard certificate for secure SSH connections.
+
+## Managing SSH Keys
+
+Before developers can connect, you need to add their SSH public keys:
+
+```bash
+# Make the script executable
+chmod +x ssh-key-management.sh
+
+# Add a developer's SSH key
+./ssh-key-management.sh add developer1 /path/to/developer1_key.pub
+
+# List all managed keys
+./ssh-key-management.sh list
+
+# Remove a developer's SSH key
+./ssh-key-management.sh remove developer1
+```
+
 ## Connecting to a Development Environment
 
 Once the setup is complete, developers can connect to the environment using:
 
 ```bash
-ssh -i ~/.ssh/your_key developer@<load-balancer-dns-name>
+ssh -i ~/.ssh/your_key developer@qdev.ngdegtm.com
 ```
 
-The load balancer DNS name is provided at the end of the load balancer setup script.
+## Security Features
 
-## Managing SSH Keys
-
-Before developers can connect, you need to add their SSH public keys to the container:
-
-1. Create a script to update the authorized_keys file in the EFS volume
-2. Mount the EFS volume to an EC2 instance or use AWS Systems Manager to access it
-3. Add developer SSH keys to the authorized_keys file in the EFS volume
+- TLS encryption for SSH connections using the wildcard certificate
+- Custom domain for easier access
+- SSH key-based authentication only (no passwords)
+- Network isolation with security groups
+- Persistent storage with EFS
 
 ## Next Steps
 

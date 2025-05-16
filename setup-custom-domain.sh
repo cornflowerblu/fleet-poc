@@ -3,7 +3,7 @@ set -e
 
 # Configuration
 AWS_REGION="us-east-1"  # Change to your preferred region
-DOMAIN_NAME="dev-fleet.ngdegtm.com"
+DOMAIN_NAME="qdev.ngdegtm.com"
 HOSTED_ZONE="ngdegtm.com"
 LB_NAME="dev-fleet-lb"
 

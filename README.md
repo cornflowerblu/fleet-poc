@@ -7,7 +7,7 @@ This directory contains the initial Proof of Concept (POC) for the Linux Develop
 This POC implements the first stages of the implementation plan:
 1. Creating a base development container image with necessary tools and SSH access capabilities
 2. Setting up the infrastructure for a centrally managed Linux development environment fleet
-3. Configuring load balancer access for developers
+3. Configuring load balancer access for developers with a custom domain and TLS certificate
 
 ## Components
 
@@ -26,6 +26,7 @@ This POC implements the first stages of the implementation plan:
 - `ecs-task-definition.json`: Defines the ECS task for development environments
 - `deploy-environment.sh`: Deploys the ECS cluster and task definition
 - `setup-load-balancer.sh`: Creates a Network Load Balancer for SSH access
+- `setup-custom-domain.sh`: Configures a custom domain and TLS certificate
 
 ### Access Management
 - `ssh-key-management.sh`: Tool for managing developer SSH keys
@@ -34,15 +35,18 @@ This POC implements the first stages of the implementation plan:
 ## Architecture
 
 ```
-                   ┌─────────────────┐
-                   │                 │
-                   │  Network Load   │
-                   │   Balancer      │
-                   │    (SSH)        │
-                   │                 │
-                   └────────┬────────┘
-                            │
-                            ▼
+                                 Users
+                                   │
+                                   ▼
+                   ┌─────────────────────────────┐
+                   │                             │
+                   │  Network Load Balancer      │
+                   │  (TLS + Custom Domain)      │
+                   │  qdev.ngdegtm.com           │
+                   │                             │
+                   └─────────────────┬───────────┘
+                                     │
+                                     ▼
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
 │                 │  │                 │  │                 │
 │  ECS Fargate    │  │  ECS Fargate    │  │  ECS Fargate    │
@@ -64,6 +68,8 @@ This POC implements the first stages of the implementation plan:
 
 ## Security Features
 
+- TLS encryption for SSH connections using wildcard certificate
+- Custom domain for easier access (qdev.ngdegtm.com)
 - SSH password authentication is disabled
 - Root login is disabled
 - Key-based authentication only
