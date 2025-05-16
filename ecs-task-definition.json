@@ -1,0 +1,63 @@
+{
+  "family": "dev-environment",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/devFleetTaskRole",
+  "networkMode": "awsvpc",
+  "containerDefinitions": [
+    {
+      "name": "dev-container",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/dev-fleet-containers:base-dev-env",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 22,
+          "hostPort": 22,
+          "protocol": "tcp"
+        }
+      ],
+      "mountPoints": [
+        {
+          "sourceVolume": "dev-workspace",
+          "containerPath": "/home/developer/workspace",
+          "readOnly": false
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/dev-environment",
+          "awslogs-region": "REGION",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "linuxParameters": {
+        "initProcessEnabled": true
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "service ssh status || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ],
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "1024",
+  "memory": "2048",
+  "volumes": [
+    {
+      "name": "dev-workspace",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "EFS_ID",
+        "rootDirectory": "/",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "iam": "ENABLED"
+        }
+      }
+    }
+  ]
+}
