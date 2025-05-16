@@ -57,6 +57,9 @@ This creates the necessary IAM roles and policies for ECS tasks and EFS access.
 ### 4. Deploy the Environment
 
 ```bash
+# Create the ECS cluster first
+aws ecs create-cluster --cluster-name dev-fleet-cluster --region us-east-1
+
 # Make the script executable
 chmod +x deploy-environment.sh
 
@@ -64,7 +67,7 @@ chmod +x deploy-environment.sh
 ./deploy-environment.sh
 ```
 
-This creates an ECS cluster and registers the task definition for development environments.
+This creates an ECS cluster and registers the task definition for development environments. Note that you need to create the ECS cluster first before running the deployment script.
 
 ### 5. Set Up Load Balancer and ECS Service
 
