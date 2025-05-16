@@ -1,0 +1,19 @@
+{
+  "ecr_repositories": [
+    "onboarding-app-repo",
+    "flaskr-monorepo",
+    "dev-fleet-containers",
+    "custom-nginx",
+    "onboarding-app",
+    "cdk-hnb659fds-container-assets-510985353423-us-east-1",
+    "flaskr"
+  ],
+  "efs_filesystems": {
+    "dev-fleet-persistent-storage": "fs-0b2aefa1681ffa5f2",
+    "FlaskrEfs": "fs-05ecb3457437b3a44",
+    "rogers-prod-cluster-2-efs": "fs-04a0fec077b2eeece"
+  },
+  "ecs_clusters": [
+    "FlaskrMonorepoEcsStack-FlaskrMonorepoClusterAED7CEE9-kVVJeyTYOl8d"
+  ]
+}

@@ -492,7 +492,7 @@ Resources:
     Condition: HasWildcardCertificate
     Properties:
       HostedZoneName: !Sub ${HostedZoneName}.
-      Name: !Sub web.${DomainName}
+      Name: !Sub web-${DomainName}
       Type: A
       AliasTarget:
         HostedZoneId: !GetAtt DevFleetAppLoadBalancer.CanonicalHostedZoneID
@@ -563,4 +563,4 @@ Outputs:
   HttpsUrl:
     Description: HTTPS URL to check container health
     Condition: HasWildcardCertificate
-    Value: !Sub https://web.${DomainName}/
+    Value: !Sub https://web-${DomainName}/

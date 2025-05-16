@@ -16,6 +16,7 @@ This CDK implementation replaces the CloudFormation template with a more robust,
 - AWS CDK v2
 - AWS CLI configured with appropriate permissions
 - Docker (for building container images)
+- Boto3 (for resource lookup)
 
 ## Installation
 
@@ -53,7 +54,7 @@ cd ..
 After deployment, you can access your development environment using:
 
 - **SSH Access**: `ssh -i ~/.ssh/your_key developer@qdev.ngdegtm.com`
-- **Health Check**: `https://web.qdev.ngdegtm.com/` (requires wildcard certificate)
+- **Health Check**: `https://web-qdev.ngdegtm.com/` (requires wildcard certificate)
 
 ## Architecture
 
@@ -69,10 +70,11 @@ The CDK stack creates the following resources:
 
 ## Key Features
 
-- **Idempotent Deployment**: Resources are checked for existence before creation
+- **Idempotent Deployment**: Resources are checked for existence before creation using boto3 lookups
 - **Conditional Resources**: HTTPS components are only created if a certificate exists
 - **Resource Retention**: Critical resources like EFS and ECR repository are retained on stack deletion
 - **Security Best Practices**: TLS encryption, key-based authentication, network isolation
+- **No Fixed Resource Names**: Uses logical IDs to avoid name conflicts with existing resources
 
 ## Customization
 
@@ -81,3 +83,12 @@ You can customize the deployment by modifying the parameters in `app.py` or by p
 ```bash
 cdk deploy --context domain_name=custom.example.com --context hosted_zone_name=example.com
 ```
+
+## Troubleshooting
+
+If you encounter issues with resource creation:
+
+1. Check the logs for information about which resources are being reused vs. created
+2. Verify that the boto3 resource lookup script ran successfully
+3. For IAM role issues, you may need to manually delete conflicting roles
+4. For load balancer name conflicts, the CDK will automatically generate unique names

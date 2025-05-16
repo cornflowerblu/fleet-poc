@@ -45,7 +45,7 @@ This POC implements the first stages of the implementation plan:
 │                             │   │                             │
 │  Network Load Balancer      │   │  Application Load Balancer  │
 │  (TLS + Custom Domain)      │   │  (HTTPS + HTTP Redirect)    │
-│  qdev.ngdegtm.com           │   │  web.qdev.ngdegtm.com       │
+│  qdev.ngdegtm.com           │   │  web-qdev.ngdegtm.com       │
 │  (SSH Access)               │   │  (Health Checks)            │
 │                             │   │                             │
 └─────────────────┬───────────┘   └─────────────────┬───────────┘
@@ -111,7 +111,7 @@ This script will:
 After deployment, you can access your development environment using:
 
 - **SSH Access**: `ssh -i ~/.ssh/your_key developer@qdev.ngdegtm.com`
-- **Health Check**: `https://web.qdev.ngdegtm.com/` (requires wildcard certificate)
+- **Health Check**: `https://web-qdev.ngdegtm.com/` (requires wildcard certificate)
 
 The health check endpoint automatically redirects HTTP requests to HTTPS for security.
 
@@ -128,7 +128,7 @@ The development containers expose:
 The CloudFormation template sets up:
 - Network Load Balancer for SSH access on port 22
 - Application Load Balancer for health checks with:
-  - HTTPS access on port 443 (web.qdev.ngdegtm.com)
+  - HTTPS access on port 443 (web-qdev.ngdegtm.com)
   - Automatic redirection from HTTP to HTTPS
   - Health check endpoint that verifies container status
 
