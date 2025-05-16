@@ -1,12 +1,12 @@
 {
   "family": "dev-environment",
-  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
-  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/devFleetTaskRole",
+  "executionRoleArn": "arn:aws:iam::510985353423:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::510985353423:role/devFleetTaskRole",
   "networkMode": "awsvpc",
   "containerDefinitions": [
     {
       "name": "dev-container",
-      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/dev-fleet-containers:base-dev-env",
+      "image": "510985353423.dkr.ecr.us-east-1.amazonaws.com/dev-fleet-containers:base-dev-env",
       "essential": true,
       "portMappings": [
         {
@@ -26,7 +26,7 @@
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/dev-environment",
-          "awslogs-region": "REGION",
+          "awslogs-region": "us-east-1",
           "awslogs-stream-prefix": "ecs"
         }
       },
@@ -51,7 +51,7 @@
     {
       "name": "dev-workspace",
       "efsVolumeConfiguration": {
-        "fileSystemId": "EFS_ID",
+        "fileSystemId": "fs-040acd996f310cb93",
         "rootDirectory": "/",
         "transitEncryption": "ENABLED",
         "authorizationConfig": {
