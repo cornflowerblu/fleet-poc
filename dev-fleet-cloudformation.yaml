@@ -1,0 +1,566 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Development Fleet POC - Container Image Creation and Infrastructure Setup'
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: qdev.ngdegtm.com
+    Description: Domain name for the development environment
+  
+  HostedZoneName:
+    Type: String
+    Default: ngdegtm.com
+    Description: Route53 hosted zone name
+  
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC where resources will be deployed
+  
+  PublicSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Public subnets for the load balancer and ECS tasks
+  
+  EcrRepositoryName:
+    Type: String
+    Default: dev-fleet-containers
+    Description: Name of the ECR repository for container images
+  
+  ContainerImageTag:
+    Type: String
+    Default: base-dev-env
+    Description: Tag for the container image
+  
+  EcsClusterName:
+    Type: String
+    Default: dev-fleet-cluster
+    Description: Name of the ECS cluster
+  
+  EfsName:
+    Type: String
+    Default: dev-fleet-persistent-storage
+    Description: Name of the EFS file system for persistent storage
+    
+  WildcardCertificateArn:
+    Type: String
+    Default: ''
+    Description: ARN of the wildcard certificate for *.ngdegtm.com (leave empty if none exists)
+
+Resources:
+  # ECR Repository
+  DevFleetEcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref EcrRepositoryName
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep only the last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
+  # IAM Roles
+  EcsTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ecsTaskExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  DevFleetTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: devFleetTaskRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+
+  DevFleetEFSAccessPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: devFleetEFSAccessPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - elasticfilesystem:ClientMount
+              - elasticfilesystem:ClientWrite
+            Resource: '*'
+      Roles:
+        - !Ref DevFleetTaskRole
+
+  # EFS File System
+  DevFleetEFS:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+      FileSystemTags:
+        - Key: Name
+          Value: !Ref EfsName
+
+  # EFS Security Group
+  EfsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EfsName}-sg
+      GroupDescription: Security group for Dev Fleet EFS
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          CidrIp: !GetAtt VpcInfo.CidrBlock
+
+  # EFS Mount Targets (one per subnet)
+  EfsMountTargets:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt CreateEfsMountTargetsFunction.Arn
+      FileSystemId: !Ref DevFleetEFS
+      SubnetIds: !Ref PublicSubnets
+      SecurityGroupId: !Ref EfsSecurityGroup
+
+  # Lambda function to create EFS mount targets
+  CreateEfsMountTargetsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import logging
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          def handler(event, context):
+              logger.info('Received event: %s', event)
+              
+              if event['RequestType'] == 'Delete':
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  return
+              
+              try:
+                  file_system_id = event['ResourceProperties']['FileSystemId']
+                  subnet_ids = event['ResourceProperties']['SubnetIds']
+                  security_group_id = event['ResourceProperties']['SecurityGroupId']
+                  
+                  efs = boto3.client('efs')
+                  mount_targets = []
+                  
+                  for subnet_id in subnet_ids:
+                      response = efs.create_mount_target(
+                          FileSystemId=file_system_id,
+                          SubnetId=subnet_id,
+                          SecurityGroups=[security_group_id]
+                      )
+                      mount_targets.append(response['MountTargetId'])
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, 
+                                  {'MountTargets': mount_targets})
+              except Exception as e:
+                  logger.error('Error: %s', str(e))
+                  cfnresponse.send(event, context, cfnresponse.FAILED, 
+                                  {'Error': str(e)})
+
+  # Lambda execution role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EFSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticfilesystem:CreateMountTarget
+                  - elasticfilesystem:DescribeMountTargets
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                Resource: '*'
+
+  # CloudWatch Log Group
+  DevEnvironmentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/dev-environment
+      RetentionInDays: 30
+
+  # ECS Cluster
+  DevFleetCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref EcsClusterName
+
+  # ECS Task Definition
+  DevEnvironmentTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: dev-environment
+      ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt DevFleetTaskRole.Arn
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '1024'
+      Memory: '2048'
+      ContainerDefinitions:
+        - Name: dev-container
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EcrRepositoryName}:${ContainerImageTag}
+          Essential: true
+          PortMappings:
+            - ContainerPort: 22
+              HostPort: 22
+              Protocol: tcp
+            - ContainerPort: 80
+              HostPort: 80
+              Protocol: tcp
+          MountPoints:
+            - SourceVolume: dev-workspace
+              ContainerPath: /home/developer/workspace
+              ReadOnly: false
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref DevEnvironmentLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          LinuxParameters:
+            InitProcessEnabled: true
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -s http://localhost:80 > /dev/null && echo 'HTTP health check passed' || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+      Volumes:
+        - Name: dev-workspace
+          EFSVolumeConfiguration:
+            FileSystemId: !Ref DevFleetEFS
+            RootDirectory: /
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              IAM: ENABLED
+
+  # Security Groups
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: dev-fleet-lb-sg
+      GroupDescription: Security group for Dev Fleet Load Balancer
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: dev-fleet-service-sg
+      GroupDescription: Security group for Dev Fleet ECS Tasks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  # Target Group
+  DevFleetTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: dev-fleet-target-group
+      Protocol: TCP
+      Port: 22
+      VpcId: !Ref VpcId
+      TargetType: ip
+      HealthCheckProtocol: HTTP
+      HealthCheckPort: '80'
+      HealthCheckPath: /
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 3
+
+  # Network Load Balancer
+  DevFleetLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: dev-fleet-lb
+      Type: network
+      Subnets: !Ref PublicSubnets
+      Tags:
+        - Key: Name
+          Value: dev-fleet-lb
+
+  # NLB Listener for SSH
+  DevFleetSshListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref DevFleetLoadBalancer
+      Protocol: TCP
+      Port: 22
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref DevFleetTargetGroup
+          
+  # Application Load Balancer for HTTP/HTTPS
+  DevFleetAppLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Condition: HasWildcardCertificate
+    Properties:
+      Name: dev-fleet-app-lb
+      Type: application
+      Subnets: !Ref PublicSubnets
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: dev-fleet-app-lb
+          
+  # HTTP Target Group
+  DevFleetHttpTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: HasWildcardCertificate
+    Properties:
+      Name: dev-fleet-http-tg
+      Protocol: HTTP
+      Port: 80
+      VpcId: !Ref VpcId
+      TargetType: ip
+      HealthCheckPath: /
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 3
+      
+  # HTTP Listener (redirects to HTTPS)
+  DevFleetHttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasWildcardCertificate
+    Properties:
+      LoadBalancerArn: !Ref DevFleetAppLoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: '443'
+            Host: '#{host}'
+            Path: '/#{path}'
+            Query: '#{query}'
+            StatusCode: HTTP_301
+            
+  # HTTPS Listener
+  DevFleetHttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasWildcardCertificate
+    Properties:
+      LoadBalancerArn: !Ref DevFleetAppLoadBalancer
+      Protocol: HTTPS
+      Port: 443
+      Certificates:
+        - CertificateArn: !Ref WildcardCertificateArn
+      SslPolicy: ELBSecurityPolicy-TLS-1-2-2017-01
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref DevFleetHttpTargetGroup
+
+  # ECS Service
+  DevFleetService:
+    Type: AWS::ECS::Service
+    DependsOn: DevFleetSshListener
+    Properties:
+      ServiceName: dev-fleet-service
+      Cluster: !Ref DevFleetCluster
+      TaskDefinition: !Ref DevEnvironmentTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: 
+            - !Select [0, !Ref PublicSubnets]
+          SecurityGroups:
+            - !Ref TaskSecurityGroup
+          AssignPublicIp: ENABLED
+      LoadBalancers:
+        - TargetGroupArn: !Ref DevFleetTargetGroup
+          ContainerName: dev-container
+          ContainerPort: 22
+          
+  # Register HTTP targets if certificate exists
+  DevFleetHttpTargetRegistration:
+    Type: AWS::ECS::Service
+    Condition: HasWildcardCertificate
+    DependsOn: DevFleetService
+    Properties:
+      ServiceName: dev-fleet-http-service
+      Cluster: !Ref DevFleetCluster
+      TaskDefinition: !Ref DevEnvironmentTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: 
+            - !Select [0, !Ref PublicSubnets]
+          SecurityGroups:
+            - !Ref TaskSecurityGroup
+          AssignPublicIp: ENABLED
+      LoadBalancers:
+        - TargetGroupArn: !Ref DevFleetHttpTargetGroup
+          ContainerName: dev-container
+          ContainerPort: 80
+          ContainerPort: 22
+
+  # Route53 Record for SSH
+  DevFleetDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneName: !Sub ${HostedZoneName}.
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt DevFleetLoadBalancer.CanonicalHostedZoneID
+        DNSName: !GetAtt DevFleetLoadBalancer.DNSName
+        EvaluateTargetHealth: true
+        
+  # Route53 Record for HTTPS
+  DevFleetHttpsDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasWildcardCertificate
+    Properties:
+      HostedZoneName: !Sub ${HostedZoneName}.
+      Name: !Sub web.${DomainName}
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt DevFleetAppLoadBalancer.CanonicalHostedZoneID
+        DNSName: !GetAtt DevFleetAppLoadBalancer.DNSName
+        EvaluateTargetHealth: true
+
+  # Custom resource to get VPC CIDR block
+  VpcInfo:
+    Type: Custom::VpcInfo
+    Properties:
+      ServiceToken: !GetAtt VpcInfoFunction.Arn
+      VpcId: !Ref VpcId
+
+  # Lambda function to get VPC CIDR block
+  VpcInfoFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          
+          def handler(event, context):
+              if event['RequestType'] == 'Delete':
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  return
+              
+              try:
+                  vpc_id = event['ResourceProperties']['VpcId']
+                  ec2 = boto3.client('ec2')
+                  response = ec2.describe_vpcs(VpcIds=[vpc_id])
+                  cidr_block = response['Vpcs'][0]['CidrBlock']
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, 
+                                  {'CidrBlock': cidr_block})
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, 
+                                  {'Error': str(e)})
+
+Conditions:
+  HasWildcardCertificate: !Not [!Equals [!Ref WildcardCertificateArn, '']]
+
+Outputs:
+  LoadBalancerDnsName:
+    Description: DNS name of the load balancer
+    Value: !GetAtt DevFleetLoadBalancer.DNSName
+  
+  CustomDomainName:
+    Description: Custom domain name for the development environment
+    Value: !Ref DomainName
+  
+  EfsId:
+    Description: ID of the EFS file system
+    Value: !Ref DevFleetEFS
+  
+  EcrRepositoryUri:
+    Description: URI of the ECR repository
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EcrRepositoryName}
+  
+  ConnectionCommand:
+    Description: Command to connect to the development environment
+    Value: !Sub ssh -i ~/.ssh/your_key developer@${DomainName}
+    
+  HttpsUrl:
+    Description: HTTPS URL to check container health
+    Condition: HasWildcardCertificate
+    Value: !Sub https://web.${DomainName}/
