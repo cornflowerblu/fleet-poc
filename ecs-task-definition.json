@@ -13,6 +13,11 @@
           "containerPort": 22,
           "hostPort": 22,
           "protocol": "tcp"
+        },
+        {
+          "containerPort": 80,
+          "hostPort": 80,
+          "protocol": "tcp"
         }
       ],
       "mountPoints": [
@@ -34,7 +39,7 @@
         "initProcessEnabled": true
       },
       "healthCheck": {
-        "command": ["CMD-SHELL", "service ssh status && netstat -tulpn | grep -q ':22 ' && ps aux | grep -v grep | grep -q sshd && echo 'SSH service is healthy' || exit 1"],
+        "command": ["CMD-SHELL", "curl -s http://localhost:80 > /dev/null && echo 'HTTP health check passed' || exit 1"],
         "interval": 30,
         "timeout": 5,
         "retries": 3,

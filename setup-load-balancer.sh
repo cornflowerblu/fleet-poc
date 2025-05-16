@@ -82,6 +82,15 @@ if [ "$TASK_SG_ID" == "None" ] || [ -z "$TASK_SG_ID" ]; then
     --port 22 \
     --source-group ${LB_SG_ID} \
     --region ${AWS_REGION}
+    
+  # Allow HTTP traffic for health checks
+  echo "Adding HTTP ingress rule to task security group..."
+  aws ec2 authorize-security-group-ingress \
+    --group-id ${TASK_SG_ID} \
+    --protocol tcp \
+    --port 80 \
+    --cidr 0.0.0.0/0 \
+    --region ${AWS_REGION}
 else
   echo "Using existing ECS tasks security group: ${TASK_SG_ID}"
 fi
@@ -103,8 +112,9 @@ if [ -z "$TG_ARN" ]; then
     --port 22 \
     --vpc-id ${VPC_ID} \
     --target-type ip \
-    --health-check-protocol TCP \
-    --health-check-port 22 \
+    --health-check-protocol HTTP \
+    --health-check-port 80 \
+    --health-check-path "/" \
     --health-check-enabled \
     --health-check-interval-seconds 30 \
     --healthy-threshold-count 3 \

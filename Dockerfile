@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     vim \
     wget \
     zsh \
+    net-tools \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -35,11 +36,22 @@ RUN mkdir -p /home/developer/.ssh && \
     chmod 600 /home/developer/.ssh/authorized_keys && \
     chown -R developer:developer /home/developer/.ssh
 
+# Create directory for HTTP server
+RUN mkdir -p /var/www/html
+RUN echo '<!DOCTYPE html><html><head><title>Dev Container Health Check</title></head><body><h1>Development Container is Healthy</h1></body></html>' > /var/www/html/index.html
+
 # Set up working directory
 WORKDIR /home/developer
 
-# Expose SSH port
-EXPOSE 22
+# Copy health check scripts
+COPY simple-http-server.sh /usr/local/bin/
+COPY updated-health-check.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/simple-http-server.sh /usr/local/bin/updated-health-check.sh
 
-# Start SSH server
-CMD ["/usr/sbin/sshd", "-D"]
+# Expose SSH port and HTTP port for health checks
+EXPOSE 22 80
+
+# Start SSH server and HTTP server
+COPY entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh
+CMD ["/usr/local/bin/entrypoint.sh"]
